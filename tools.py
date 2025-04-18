@@ -2,50 +2,55 @@ import pandas as pd
 import re
 import os
 from dotenv import load_dotenv
-from typing_extensions import TypedDict
-from langgraph.graph import START, StateGraph
 from google import genai
+import uuid
+
+# Load environment variables
+load_dotenv()
 
 # Initialize Google Gemini client
-load_dotenv()
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 def load_data():
     return pd.read_csv('invoice_dataset.csv')
 
-def generate(prompt):
-    model_name = "gemini-2.0-flash"
-    response = client.models.generate_content(
-        model=model_name,
-        contents=prompt
-    )
-    return response.text.rstrip()
+def extract_invoice_ids_prompt(question, previous_invoice_ids=None):
+    previous_context_instruction = ""
+    if previous_invoice_ids:
+        previous_context_instruction = f"""
+        Vous avez précédemment identifié les numéros de facture suivants : '{','.join(previous_invoice_ids)}'.
+        Si la question actuelle se réfère à ces mêmes factures, et qu'aucun nouveau numéro de facture n'est explicitement mentionné,
+        veuillez répondre par le mot clé 'CONTINUER'.
+        Signaux de nouvelle requête (non exhaustif):
+        - Mention explicite de 'nouvelle facture', 'autre facture'.
+        - Présence d'un format de numéro de facture différent.
+        - Question clairement hors du contexte des factures précédentes.
+        """
 
-class State(TypedDict):
-    question: str
-    invoice_ids: str
-    invoice_info: str
-    answer: str
+    return f"""
+    Assistant de service conçu pour extraire les numéros de facture des questions de l'utilisateur.
+    
+    Veuillez extraire tous les numéros de facture ('FAC-' suivi de quatre chiffres, entre FAC-0001 et FAC-1000) mentionnés dans la question.
+    Gérez les mentions informelles et les erreurs de frappe.
+    Si une plage est indiquée, extrayez tous les numéros pertinents.
 
-def extract_invoice_ids(state: State):
-    prompt = f"""
-    Vous êtes un assistant serviable conçu pour extraire les numéros de facture des questions de l'utilisateur.
-    Veuillez extraire tous les numéros de facture mentionnés dans la question suivante, même s'ils sont mentionnés de manière informelle ou contiennent des erreurs de frappe.
-    Les numéros de facture commencent par 'FAC-' suivi de quatre chiffres, et sont compris entre FAC-0001 et FAC-1000.
-    Si une plage de factures est mentionnée  veuillez extraire tous les numéros de facture pertinents, 
-    Par exemple:
-        - "les 5 premières factures" doit retourner 'FAC-0001,FAC-0002,FAC-0003,FAC-0004,FAC-0005'
-        - "les 5 dernières factures" doit retourner 'FAC-0996,FAC-0997,FAC-0998,FAC-0999,FAC-1000'
-    Si plusieurs numéros de facture sont présents, séparez-les par des virgules.
-    Si aucun numéro de facture n'est trouvé, veuillez répondre par 'AUCUN'.
-    N'incluez aucune description ou contexte supplémentaire.
+    Exemples d'extraction:
+    - "les 5 premières factures" -> 'FAC-0001,FAC-0002,FAC-0003,FAC-0004,FAC-0005'
+    - "les 5 dernières factures" -> 'FAC-0996,FAC-0997,FAC-0998,FAC-0999,FAC-1000'
+    - "montant de la facture FAC-0001 et FAC-0005" -> 'FAC-0001,FAC-0005'
 
-    Question: {state['question']}
+    {previous_context_instruction}
+
+    Format de sortie:
+    - Nouveaux numéros: 'FAC-XXXX,FAC-YYYY'. 
+    - Aucun nouveau numéro trouvé et question se réfère aux précédentes: 'CONTINUER'
+    - Aucun numéro trouvé dans une nouvelle requête: 'AUCUN'
+    - N'incluez aucune description ou contexte supplémentaire.
+
+    Question: {question}
     """
-    return {"invoice_ids": generate(prompt)}
 
-def get_invoice_information(state: State, invoice_df):
-    invoice_ids_str = state["invoice_ids"]
+def get_invoice_information(invoice_ids_str, invoice_df):
     if invoice_ids_str.upper() == "AUCUN":
         return {"invoice_info": "Aucun numéro de facture trouvé dans la question."}
     else:
@@ -66,12 +71,10 @@ def get_invoice_information(state: State, invoice_df):
             else:
                 prompt_injection += f"Avertissement : Le numéro de facture '{key}' n'a pas été trouvé.\n"
         
-        return {"invoice_info": prompt_injection}
+        return prompt_injection
 
-def answer_based_on_info(state: State):
-    question = state["question"]
-    invoice_info = state["invoice_info"]
-    prompt = f"""
+def answer_based_on_info_prompt(question, invoice_info):
+    return f"""
     Vous êtes un assistant IA expert en analyse de factures. Votre rôle est de répondre aux questions posées sur les factures, en utilisant exclusivement les données fournies.
 
     **Question:** {question}
@@ -89,16 +92,72 @@ def answer_based_on_info(state: State):
     Ne dites jamais que les données sont insuffisantes. Indiquez simplement que le paiement n'est pas encore finalisé.
     Si une date est demandée, donnez la dans un format clair, comme le jour/mois/année.
     """
-    return {'answer': generate(prompt)}
 
-# Build and return the LangGraph 
-def create_invoice_graph(invoice_df):
-    def get_invoice_info_with_df(state: State):
-        return get_invoice_information(state, invoice_df)
+# Modified invoice graph implementation with multi-turn chat and streaming
+class InvoiceAssistant:
+    def __init__(self, invoice_df):
+        self.invoice_df = invoice_df
+        self.chat = client.chats.create(model="gemini-2.0-flash")
+        self.session_id = str(uuid.uuid4())
+        
+        # Send initial system context to set up the assistant's role
+        system_prompt = """
+        Vous êtes un assistant IA expert en analyse de factures d'entreprise.
+        Votre rôle est d'aider l'utilisateur à obtenir des informations précises sur les factures,
+        en utilisant exclusivement les données fournies par le système.
+
+        Vous pouvez répondre à des questions concernant:
+        - Les détails spécifiques d'une facture (montant, date, statut, etc.)
+        - Les comparaisons entre plusieurs factures
+        - Les calculs simples sur les données de factures
+
+        Utilisez uniquement les données fournies et restez factuel. N'utilisez aucune connaissance externe et ne faites pas d'hypothèses.
+        Soyez concis et précis dans vos réponses.
+        Statuts de paiement valides : "Payé", "Non Payé", "En Retard", "Partiellement Payé".
+        Modes de paiement valides : "Carte de Crédit", "Virement Bancaire", "Chèque", "Espèces", "PayPal".
+        Si le statut de paiement est "Payé", les informations sur la date et le mode de paiement peuvent être disponibles.
+        Si la date ou le mode de paiement ne sont pas fournis pour une facture, cela signifie que le paiement n'est pas encore finalisé.
+        Ne dites jamais que les données sont insuffisantes. Indiquez simplement que le paiement n'est pas encore finalisé.
+        Si une date est demandée, donnez la dans un format clair, comme le jour/mois/année.
+        Si la question nécessite des calculs, assurez-vous d'être précis et présentez les étapes importantes clairement.
+        """
+        init_response = self.chat.send_message(system_prompt)
+        self.current_invoice_ids = None
     
-    # Create and compile the graph
-    graph_builder = StateGraph(State).add_sequence(
-        [extract_invoice_ids, get_invoice_info_with_df, answer_based_on_info]
-    )
-    graph_builder.add_edge(START, "extract_invoice_ids")
-    return graph_builder.compile()
+    def process_query_with_stream(self, question):
+        # Extract invoice IDs
+        extract_prompt = extract_invoice_ids_prompt(question, self.current_invoice_ids)
+        ids_result = self.chat.send_message(extract_prompt).text
+        
+        if ids_result.upper() == "CONTINUER":
+            if self.current_invoice_ids:
+                invoice_info = get_invoice_information(self.current_invoice_ids, self.invoice_df)
+            else:
+                invoice_info = "Aucun contexte de facture précédent."
+        elif ids_result.upper() != "AUCUN":
+            self.current_invoice_ids = ids_result
+            invoice_info = get_invoice_information(ids_result, self.invoice_df)
+        else:
+            self.current_invoice_ids = None
+            invoice_info = "Aucun numéro de facture trouvé dans la question."
+        
+        # Prepare the answer prompt
+        answer_prompt = answer_based_on_info_prompt(question, invoice_info)
+        
+        # Send the message to the Gemini chat with streaming
+        response_stream = self.chat.send_message_stream(answer_prompt)
+        
+        # Store pipeline details
+        pipeline_details = {
+            "extract_prompt": extract_prompt,
+            "ids_result": ids_result,
+            "invoice_info": invoice_info,
+            "answer_prompt": answer_prompt
+        }
+        
+        full_response = ""
+        # Yield chunks of text as they become available
+        for chunk in response_stream:
+            if chunk.text:
+                full_response += chunk.text
+                yield chunk.text, pipeline_details
