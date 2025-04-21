@@ -4,7 +4,7 @@ import json
 from tools import load_data, InvoiceAssistant
 
 # Constants
-history_file = 'chat_history.json'
+history_file = '../data/chat_history.json'
 
 # Configure the Streamlit page
 st.set_page_config(

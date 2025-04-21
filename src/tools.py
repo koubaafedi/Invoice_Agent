@@ -12,7 +12,7 @@ load_dotenv()
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 def load_data():
-    return pd.read_csv('invoice_dataset.csv')
+    return pd.read_csv('../data/invoice_dataset.csv')
 
 def extract_invoice_ids_prompt(question, previous_invoice_ids):
     previous_context_instruction = ""
