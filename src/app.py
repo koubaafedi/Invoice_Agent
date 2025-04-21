@@ -2,7 +2,6 @@ import streamlit as st
 import os
 import json
 from tools import load_data, InvoiceAssistant
-import pandas as pd
 
 # Constants
 history_file = 'chat_history.json'
@@ -17,7 +16,7 @@ st.set_page_config(
 # Initialize chat history file if it doesn't exist
 if not os.path.exists(history_file):
     with open(history_file, 'w') as file:
-        json.dump({"messages": []}, file)
+        json.dump({"interactions": []}, file)
 
 # Cache the data loading function
 @st.cache_data
@@ -43,7 +42,7 @@ st.sidebar.title("Options")
 if st.sidebar.button('Effacer la conversation'):
     # Clear the chat history
     with open(history_file, 'w') as file:
-        json.dump({"messages": []}, file)
+        json.dump({"interactions": []}, file)
     
     # Reset the chat instance
     st.session_state.chat_instance = InvoiceAssistant(invoice_df)
@@ -57,66 +56,46 @@ st.header("Assistant de Factures")
 # Display chat messages from history
 with open(history_file, 'r') as file:
     data = json.load(file)
-    messages = data.get('messages', [])
+    interactions = data.get('interactions', [])
 
-# Counter for message pairs
-message_count = len(messages) // 2
-
-for i in range(message_count):
-    user_msg_idx = i * 2
-    assistant_msg_idx = i * 2 + 1
-    
+# Display each interaction (user query + assistant response)
+for i, interaction in enumerate(interactions):
     # Display user message
-    if user_msg_idx < len(messages):
-        with st.chat_message("user"):
-            st.markdown(messages[user_msg_idx]["content"])
+    with st.chat_message("user"):
+        st.markdown(interaction["user_query"])
     
     # Display assistant message
-    if assistant_msg_idx < len(messages):
-        with st.chat_message("assistant"):
-            st.markdown(messages[assistant_msg_idx]["content"])
-            
-            # Add toggle button for pipeline details
-            toggle_key = f"toggle_{i}"
-            if toggle_key not in st.session_state.toggle_states:
-                st.session_state.toggle_states[toggle_key] = False
-            
-            if st.button("Afficher/Masquer détails du pipeline", key=f"button_{i}"):
-                st.session_state.toggle_states[toggle_key] = not st.session_state.toggle_states[toggle_key]
-            
-            # Show pipeline details if toggled
-            if st.session_state.toggle_states[toggle_key] and "pipeline_details" in messages[assistant_msg_idx]:
-                details = messages[assistant_msg_idx]["pipeline_details"]
-                with st.expander("Détails du pipeline", expanded=True):
-                    st.subheader("Prompt d'extraction")
-                    st.code(details["extract_prompt"], language="text")
-                    
-                    st.subheader("Résultat de l'extraction")
-                    st.code(details["ids_result"], language="text")
-                    
-                    st.subheader("Informations sur la facture")
-                    st.code(details["invoice_info"], language="text")
-                    
-                    st.subheader("Prompt de réponse")
-                    st.code(details["answer_prompt"], language="text")
+    with st.chat_message("assistant"):
+        st.markdown(interaction["assistant_response"])
+        
+        # Add toggle button for pipeline details
+        toggle_key = f"toggle_{i}"
+        if toggle_key not in st.session_state.toggle_states:
+            st.session_state.toggle_states[toggle_key] = False
+        
+        if st.button("Afficher/Masquer détails du pipeline", key=f"button_{i}"):
+            st.session_state.toggle_states[toggle_key] = not st.session_state.toggle_states[toggle_key]
+        
+        # Show pipeline details if toggled
+        if st.session_state.toggle_states[toggle_key]:
+            with st.expander("Détails du pipeline", expanded=True):
+                st.subheader("Prompt d'extraction")
+                st.code(interaction["extract_prompt"], language="text")
+                
+                st.subheader("Résultat de l'extraction")
+                st.code(interaction["ids_result"], language="text")
+                
+                st.subheader("Informations sur la facture")
+                st.code(interaction["invoice_info"], language="text")
+                
+                st.subheader("Prompt de réponse")
+                st.code(interaction["answer_prompt"], language="text")
 
 # Get user input
 user_query = st.chat_input("Posez une question sur les factures...")
 
 # Process the user query
 if user_query:
-    # Add user message to chat history
-    with open(history_file, 'r') as file:
-        data = json.load(file)
-    
-    data['messages'].append({
-        "role": "user", 
-        "content": user_query
-    })
-    
-    with open(history_file, 'w') as file:
-        json.dump(data, file)
-    
     # Display user message
     with st.chat_message("user"):
         st.markdown(user_query)
@@ -142,21 +121,28 @@ if user_query:
         # Display the final response
         message_placeholder.markdown(full_response)
     
-    # Add assistant response to chat history
+    # Add the complete interaction to chat history
     with open(history_file, 'r') as file:
         data = json.load(file)
     
-    data['messages'].append({
-        "role": "assistant", 
-        "content": full_response,
-        "pipeline_details": pipeline_details
-    })
+    # Create a new interaction entry with all pipeline details
+    new_interaction = {
+        "user_query": user_query,
+        "extract_prompt": pipeline_details.get("extract_prompt", ""),
+        "ids_result": pipeline_details.get("ids_result", ""),
+        "invoice_info": pipeline_details.get("invoice_info", ""),
+        "answer_prompt": pipeline_details.get("answer_prompt", ""),
+        "assistant_response": full_response
+    }
+    
+    # Add the new interaction to the history
+    data['interactions'].append(new_interaction)
     
     with open(history_file, 'w') as file:
         json.dump(data, file)
     
-    # Add a new toggle state for this message
-    new_toggle_key = f"toggle_{len(data['messages']) // 2 - 1}"
+    # Add a new toggle state for this interaction
+    new_toggle_key = f"toggle_{len(data['interactions']) - 1}"
     st.session_state.toggle_states[new_toggle_key] = False
     
     st.rerun()

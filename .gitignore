@@ -1,3 +1,2 @@
-.env
-chat_history.json
-invoice_dataset.csv
+./data/
+./secrets/
