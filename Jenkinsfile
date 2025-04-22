@@ -1,45 +1,34 @@
 pipeline {
-    agent any // Run on the default Jenkins agent (your Jenkins Docker container)
+    agent any // Run on the default Jenkins agent
 
     environment {
         APP_PORT = "8501"
-        // Define the process identifier here at the top level
-        // Use the path to the python3 executable within the virtual environment
+        // Define the process identifier here
         APP_PROCESS_IDENTIFIER = "venv/bin/python3 -m streamlit run app.py"
     }
 
     stages {
-        stage('Checkout') {
-            steps {
-                echo "Checking out code from SCM..."
-                checkout scm
-                echo "Code checked out."
-            }
-        }
+        // The Declarative pipeline automatically performs an initial checkout,
+        // so a dedicated 'Checkout' stage is often redundant unless you need
+        // to checkout multiple repositories or at a different point.
 
-        stage('Setup Application Environment') {
+        stage('Setup & Install') {
             steps {
-                echo "Setting up Python virtual environment and installing dependencies..."
+                echo "Setting up environment and installing dependencies..."
                 // Create a virtual environment
                 sh "python3 -m venv venv"
-
                 // Install dependencies into the virtual environment
-                sh "venv/bin/pip install --upgrade pip"
-                sh "venv/bin/pip install -r requirements.txt"
-
-                echo "Dependencies installed in virtual environment."
+                sh "venv/bin/pip install --upgrade pip && venv/bin/pip install -r requirements.txt"
             }
         }
 
-        stage('Run Application') {
+        stage('Run & Verify Application') {
             steps {
-                echo "Stopping existing application instance..."
-                // Use the variable defined in the environment block
+                echo "Stopping existing application instance and launching new one..."
+                // Stop any running instances
                 sh "pkill -f '${APP_PROCESS_IDENTIFIER}' || true"
-                echo "Existing instances stopped."
 
-                echo "Launching application in background from virtual environment..."
-                // Use the python3 executable from the virtual environment
+                // Launch application in background from virtual environment
                 sh """
                 cd src
                 nohup ../venv/bin/python3 -m streamlit run app.py \\
@@ -48,37 +37,26 @@ pipeline {
                     --server.enableCORS=false \\
                     --server.enableXsrfProtection=false > ../streamlit.log 2>&1 &
                 """
-                echo "Application launch command executed."
 
-                echo "Giving application time to start..."
-                sh "sleep 15"
+                echo "Giving application time to start and verifying..."
+                // Give it time to start and check if the process is running
+                sh "sleep 15 && pgrep -f '${APP_PROCESS_IDENTIFIER}'"
 
-                echo "Verifying application process is running..."
-                // Use the variable defined in the environment block for pgrep
-                sh "pgrep -f '${APP_PROCESS_IDENTIFIER}'"
-                echo "Application process found."
-            }
-        }
-
-        stage('Verify Application Access') {
-            steps {
-                 echo "Attempting to access application endpoint..."
-                 sh "curl -Is http://localhost:${APP_PORT} | head -n 1"
-                 echo "Application endpoint check completed."
+                // Verify application access
+                sh "curl -Is http://localhost:${APP_PORT} | head -n 1"
             }
         }
     }
 
     post {
         always {
-            deleteDir()
+            deleteDir() // Clean up the workspace after the job finishes
         }
         failure {
-            echo "Pipeline failed! Check the logs for details."
+            echo "Pipeline failed!"
         }
         success {
-            echo "Pipeline completed successfully! Application should be running in the background."
-            echo "Access the app at http://localhost:${APP_PORT}"
+            echo "Pipeline completed successfully. App running on http://localhost:${APP_PORT}"
         }
     }
 }
