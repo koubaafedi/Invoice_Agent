@@ -2,7 +2,7 @@ import pandas as pd
 import re
 import os
 from dotenv import load_dotenv
-from google import genai
+import google.generativeai as genai  # Fixed import statement
 import uuid
 
 # Load environment variables

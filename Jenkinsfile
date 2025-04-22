@@ -5,6 +5,7 @@ pipeline {
         APP_PORT = "8501"
         APP_PROCESS_NAME = "streamlit run app.py"
         VENV_PATH = "${WORKSPACE}/venv"
+        SERVICE_FILE = "${WORKSPACE}/streamlit.service"
     }
 
     stages {
@@ -18,38 +19,55 @@ pipeline {
                 # Install dependencies quietly
                 ${VENV_PATH}/bin/pip install -q --upgrade pip
                 ${VENV_PATH}/bin/pip install -q -r requirements.txt
+                ${VENV_PATH}/bin/pip install -q google-generativeai --upgrade
                 """
             }
         }
 
         stage('Deploy Application') {
             steps {
-                echo "Deploying streamlit application..."
+                echo "Setting up systemd service for the application..."
                 
-                // Stop any running instances of the app
-                sh "pkill -f '${APP_PROCESS_NAME}' || true"
-                
-                // Create a startup script that will be used to launch the app
+                // Create a systemd service file
                 sh """
-                cat > ${WORKSPACE}/start_app.sh << 'EOL'
-#!/bin/bash
-cd ${WORKSPACE}/src
-nohup ${VENV_PATH}/bin/python -m streamlit run app.py \\
-    --server.port=${APP_PORT} \\
-    --server.address=0.0.0.0 \\
-    --server.enableCORS=false \\
-    --server.enableXsrfProtection=false > ${WORKSPACE}/streamlit.log 2>&1 &
-echo \$! > ${WORKSPACE}/app.pid
-EOL
+                cat > ${SERVICE_FILE} << 'EOL'
+[Unit]
+Description=Streamlit Invoice Assistant
+After=network.target
 
-                chmod +x ${WORKSPACE}/start_app.sh
-                
-                # Run the startup script and detach it from Jenkins process tree
-                ${WORKSPACE}/start_app.sh
+[Service]
+User=jenkins
+WorkingDirectory=${WORKSPACE}/src
+ExecStart=${VENV_PATH}/bin/python -m streamlit run app.py --server.port=${APP_PORT} --server.address=0.0.0.0 --server.enableCORS=false --server.enableXsrfProtection=false
+Restart=always
+RestartSec=5
+StandardOutput=append:${WORKSPACE}/streamlit.log
+StandardError=append:${WORKSPACE}/streamlit.log
+
+[Install]
+WantedBy=multi-user.target
+EOL
                 """
                 
-                // Give the app a moment to start
-                sh "sleep 10"
+                // Install and start the service
+                sh """
+                # Move service file to system directory
+                sudo cp ${SERVICE_FILE} /etc/systemd/system/streamlit.service
+                
+                # Reload systemd to recognize the new service
+                sudo systemctl daemon-reload
+                
+                # Stop any existing service and start the new one
+                sudo systemctl stop streamlit.service || true
+                sudo systemctl enable streamlit.service
+                sudo systemctl start streamlit.service
+                
+                # Wait for the service to start
+                sleep 10
+                
+                # Check service status
+                sudo systemctl status streamlit.service
+                """
                 
                 // Verify the application is running
                 sh """
@@ -68,32 +86,13 @@ EOL
     post {
         failure {
             echo "Pipeline failed! Check logs for details."
-            // Cleanup in case of failure
-            sh "pkill -f '${APP_PROCESS_NAME}' || true"
         }
         success {
-            echo "Application successfully deployed!"
+            echo "Application successfully deployed as a system service!"
             echo "Access the application at: http://localhost:${APP_PORT}"
-            
-            // Create a simple health check script that can be run as a cron job
-            sh """
-            cat > ${WORKSPACE}/health_check.sh << 'EOL'
-#!/bin/bash
-if ! pgrep -f "${APP_PROCESS_NAME}" > /dev/null; then
-    echo "Streamlit app is not running. Restarting..."
-    ${WORKSPACE}/start_app.sh
-    echo "App restarted at \$(date)" >> ${WORKSPACE}/restart_log.txt
-fi
-EOL
-            chmod +x ${WORKSPACE}/health_check.sh
-            
-            echo "Created health check script at ${WORKSPACE}/health_check.sh"
-            echo "Consider adding this to crontab to ensure app stays running:"
-            echo "*/5 * * * * ${WORKSPACE}/health_check.sh"
-            """
-            
-            // Display information about the running process
-            sh "ps -ef | grep '${APP_PROCESS_NAME}' | grep -v grep || true"
+            echo "Service will automatically restart if it crashes."
+            echo "To check service status: sudo systemctl status streamlit.service"
+            echo "To view logs: sudo journalctl -u streamlit.service"
         }
     }
 }
