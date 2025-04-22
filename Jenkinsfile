@@ -5,7 +5,7 @@ pipeline {
         APP_PORT = "8501"
         APP_PROCESS_NAME = "streamlit run app.py"
         VENV_PATH = "${WORKSPACE}/venv"
-        SERVICE_FILE = "${WORKSPACE}/streamlit.service"
+        DAEMON_SCRIPT = "${WORKSPACE}/daemon.sh"
     }
 
     stages {
@@ -26,56 +26,124 @@ pipeline {
 
         stage('Deploy Application') {
             steps {
-                echo "Setting up systemd service for the application..."
+                echo "Creating daemon script for persistent application..."
                 
-                // Create a systemd service file
+                // Create a daemon script that will keep the app running
                 sh """
-                cat > ${SERVICE_FILE} << 'EOL'
-[Unit]
-Description=Streamlit Invoice Assistant
-After=network.target
+                cat > ${DAEMON_SCRIPT} << 'EOL'
+#!/bin/bash
 
-[Service]
-User=jenkins
-WorkingDirectory=${WORKSPACE}/src
-ExecStart=${VENV_PATH}/bin/python -m streamlit run app.py --server.port=${APP_PORT} --server.address=0.0.0.0 --server.enableCORS=false --server.enableXsrfProtection=false
-Restart=always
-RestartSec=5
-StandardOutput=append:${WORKSPACE}/streamlit.log
-StandardError=append:${WORKSPACE}/streamlit.log
+# Configuration
+WORKSPACE="${WORKSPACE}"
+VENV="${VENV_PATH}"
+PORT="${APP_PORT}"
+LOGFILE="${WORKSPACE}/streamlit.log"
+PIDFILE="${WORKSPACE}/app.pid"
+STARTCMD="${VENV_PATH}/bin/python -m streamlit run app.py --server.port=${APP_PORT} --server.address=0.0.0.0 --server.enableCORS=false --server.enableXsrfProtection=false"
 
-[Install]
-WantedBy=multi-user.target
+# Function to start the application
+start_app() {
+    echo "[$(date)] Starting Streamlit app..." >> "\$LOGFILE"
+    cd "${WORKSPACE}/src"
+    nohup \$STARTCMD >> "\$LOGFILE" 2>&1 &
+    echo \$! > "\$PIDFILE"
+    echo "[$(date)] App started with PID \$(cat \$PIDFILE)" >> "\$LOGFILE"
+}
+
+# Function to check if app is running
+is_running() {
+    [ -f "\$PIDFILE" ] && ps -p \$(cat "\$PIDFILE") > /dev/null 2>&1
+}
+
+# Function to stop the application
+stop_app() {
+    if [ -f "\$PIDFILE" ]; then
+        echo "[$(date)] Stopping Streamlit app..." >> "\$LOGFILE"
+        PID=\$(cat "\$PIDFILE")
+        kill \$PID 2>/dev/null || kill -9 \$PID 2>/dev/null || true
+        rm -f "\$PIDFILE"
+        echo "[$(date)] App stopped" >> "\$LOGFILE"
+    fi
+}
+
+# Main logic
+case "\$1" in
+    start)
+        if is_running; then
+            echo "App already running with PID \$(cat \$PIDFILE)"
+        else
+            start_app
+            sleep 5
+            if is_running; then
+                echo "App started successfully"
+            else
+                echo "Failed to start app, check logs"
+                exit 1
+            fi
+        fi
+        ;;
+    stop)
+        if is_running; then
+            stop_app
+            echo "App stopped"
+        else
+            echo "App not running"
+        fi
+        ;;
+    restart)
+        stop_app
+        sleep 2
+        start_app
+        sleep 5
+        if is_running; then
+            echo "App restarted successfully"
+        else
+            echo "Failed to restart app, check logs"
+            exit 1
+        fi
+        ;;
+    status)
+        if is_running; then
+            echo "App is running with PID \$(cat \$PIDFILE)"
+        else
+            echo "App is not running"
+            exit 1
+        fi
+        ;;
+    *)
+        echo "Usage: \$0 {start|stop|restart|status}"
+        exit 1
+        ;;
+esac
+
+exit 0
 EOL
+                chmod +x ${DAEMON_SCRIPT}
                 """
                 
-                // Install and start the service
+                // Stop any existing instances and start the app
                 sh """
-                # Move service file to system directory
-                sudo cp ${SERVICE_FILE} /etc/systemd/system/streamlit.service
+                # Stop any running instances
+                pkill -f '${APP_PROCESS_NAME}' || true
                 
-                # Reload systemd to recognize the new service
-                sudo systemctl daemon-reload
+                # Start the app using the daemon script
+                ${DAEMON_SCRIPT} start
                 
-                # Stop any existing service and start the new one
-                sudo systemctl stop streamlit.service || true
-                sudo systemctl enable streamlit.service
-                sudo systemctl start streamlit.service
+                # Wait for the app to initialize
+                sleep 15
                 
-                # Wait for the service to start
-                sleep 10
-                
-                # Check service status
-                sudo systemctl status streamlit.service
+                # Check if app is running
+                ${DAEMON_SCRIPT} status
                 """
                 
-                // Verify the application is running
+                // Verify the application is accessible
                 sh """
+                # Test app accessibility
                 if curl -s --head --fail http://localhost:${APP_PORT} > /dev/null; then
-                    echo "Application is running correctly"
+                    echo "Application is accessible at http://localhost:${APP_PORT}"
                 else
-                    echo "Application failed to start properly"
-                    cat ${WORKSPACE}/streamlit.log
+                    echo "ERROR: Application is not accessible!"
+                    tail -n 50 ${WORKSPACE}/streamlit.log
                     exit 1
                 fi
                 """
@@ -88,11 +156,16 @@ EOL
             echo "Pipeline failed! Check logs for details."
         }
         success {
-            echo "Application successfully deployed as a system service!"
+            echo "Application successfully deployed!"
             echo "Access the application at: http://localhost:${APP_PORT}"
-            echo "Service will automatically restart if it crashes."
-            echo "To check service status: sudo systemctl status streamlit.service"
-            echo "To view logs: sudo journalctl -u streamlit.service"
+            echo ""
+            echo "Use the following commands to manage the application:"
+            echo "${DAEMON_SCRIPT} status  - Check if app is running"
+            echo "${DAEMON_SCRIPT} restart - Restart the app"
+            echo "${DAEMON_SCRIPT} stop    - Stop the app"
+            echo ""
+            echo "Set up a cron job to ensure app stays running:"
+            echo "* * * * * ${DAEMON_SCRIPT} start >/dev/null 2>&1"
         }
     }
 }
