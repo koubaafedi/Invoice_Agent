@@ -43,26 +43,26 @@ STARTCMD="${VENV_PATH}/bin/python -m streamlit run app.py --server.port=${APP_PO
 
 # Function to start the application
 start_app() {
-    echo "[$(date)] Starting Streamlit app..." >> "\$LOGFILE"
+    echo "[\\$(date)] Starting Streamlit app..." >> "\$LOGFILE"
     cd "${WORKSPACE}/src"
     nohup \$STARTCMD >> "\$LOGFILE" 2>&1 &
     echo \$! > "\$PIDFILE"
-    echo "[$(date)] App started with PID \$(cat \$PIDFILE)" >> "\$LOGFILE"
+    echo "[\\$(date)] App started with PID \\$(cat \$PIDFILE)" >> "\$LOGFILE"
 }
 
 # Function to check if app is running
 is_running() {
-    [ -f "\$PIDFILE" ] && ps -p \$(cat "\$PIDFILE") > /dev/null 2>&1
+    [ -f "\$PIDFILE" ] && ps -p \\$(cat "\$PIDFILE") > /dev/null 2>&1
 }
 
 # Function to stop the application
 stop_app() {
     if [ -f "\$PIDFILE" ]; then
-        echo "[$(date)] Stopping Streamlit app..." >> "\$LOGFILE"
-        PID=\$(cat "\$PIDFILE")
+        echo "[\\$(date)] Stopping Streamlit app..." >> "\$LOGFILE"
+        PID=\\$(cat "\$PIDFILE")
         kill \$PID 2>/dev/null || kill -9 \$PID 2>/dev/null || true
         rm -f "\$PIDFILE"
-        echo "[$(date)] App stopped" >> "\$LOGFILE"
+        echo "[\\$(date)] App stopped" >> "\$LOGFILE"
     fi
 }
 
@@ -70,7 +70,7 @@ stop_app() {
 case "\$1" in
     start)
         if is_running; then
-            echo "App already running with PID \$(cat \$PIDFILE)"
+            echo "App already running with PID \\$(cat \$PIDFILE)"
         else
             start_app
             sleep 5
@@ -104,7 +104,7 @@ case "\$1" in
         ;;
     status)
         if is_running; then
-            echo "App is running with PID \$(cat \$PIDFILE)"
+            echo "App is running with PID \\$(cat \$PIDFILE)"
         else
             echo "App is not running"
             exit 1
@@ -154,6 +154,10 @@ EOL
     post {
         failure {
             echo "Pipeline failed! Check logs for details."
+            sh """
+            echo "=== Last 50 lines of log ==="
+            tail -n 50 ${WORKSPACE}/streamlit.log || true
+            """
         }
         success {
             echo "Application successfully deployed!"
@@ -164,8 +168,11 @@ EOL
             echo "${DAEMON_SCRIPT} restart - Restart the app"
             echo "${DAEMON_SCRIPT} stop    - Stop the app"
             echo ""
-            echo "Set up a cron job to ensure app stays running:"
+            echo "Add this to your crontab to ensure app stays running:"
             echo "* * * * * ${DAEMON_SCRIPT} start >/dev/null 2>&1"
+            
+            // Display running process info
+            sh "ps -ef | grep '${APP_PROCESS_NAME}' | grep -v grep || true"
         }
     }
 }
