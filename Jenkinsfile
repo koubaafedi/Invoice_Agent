@@ -20,10 +20,9 @@ pipeline {
         stage('Setup Application Environment') {
             steps {
                 echo "Setting up Python environment and installing dependencies..."
-                // THESE COMMANDS REQUIRE 'python' AND 'pip' TO BE AVAILABLE
-                // IN THE JENKINS AGENT CONTAINER'S PATH.
-                sh "python -m pip install --upgrade pip"
-                sh "pip install -r requirements.txt"
+                // Change 'python' to 'python3'
+                sh "python3 -m pip install --upgrade pip"
+                sh "python3 -m pip install -r requirements.txt" // Use python3 with pip
                 echo "Dependencies installed."
             }
         }
@@ -31,17 +30,18 @@ pipeline {
         stage('Run Application') {
             steps {
                 echo "Stopping existing application instance..."
-                // Stop any running instances of the application using pkill
-                // '|| true' ensures the step doesn't fail if no process is found
+                // Use a more specific process name for pkill/pgrep if possible
+                // Adjust this based on how the 'streamlit run app.py' process appears in 'ps aux' output
+                // The process will now likely show 'python3 -m streamlit...'
+                APP_PROCESS_IDENTIFIER = "python3 -m streamlit run app.py" // Update identifier if needed
                 sh "pkill -f '${APP_PROCESS_IDENTIFIER}' || true"
                 echo "Existing instances stopped."
 
                 echo "Launching application in background..."
-                // Launch application in background using nohup
-                // Redirect output to a log file in the workspace
+                // Change 'python' to 'python3'
                 sh """
                 cd src
-                nohup python -m streamlit run app.py \\
+                nohup python3 -m streamlit run app.py \\
                     --server.port=${APP_PORT} \\
                     --server.address=0.0.0.0 \\
                     --server.enableCORS=false \\
@@ -53,8 +53,8 @@ pipeline {
                 sh "sleep 15" // Wait for 15 seconds to allow the app to start
 
                 echo "Verifying application process is running..."
-                // Check if the process is running using pgrep
-                sh "pgrep -f '${APP_PROCESS_IDENTIFIER}'"
+                // Change 'python' to 'python3' in pgrep if you updated the identifier
+                sh "pgrep -f '${APP_PROCESS_IDENTIFIER}'" // Or adjust if pgrep target needs updating
                 echo "Application process found."
             }
         }
@@ -62,8 +62,7 @@ pipeline {
         stage('Verify Application Access') {
             steps {
                  echo "Attempting to access application endpoint..."
-                 // Perform a basic health check by trying to access the application's HTTP endpoint
-                 // Requires 'curl' or 'wget' to be available in the Jenkins agent container
+                 // curl was confirmed to be installed
                  sh "curl -Is http://localhost:${APP_PORT} | head -n 1"
                  echo "Application endpoint check completed."
             }
