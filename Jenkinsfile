@@ -7,6 +7,12 @@ pipeline {
     }
 
     stages {
+        stage('test') {
+            steps {
+                echo "Running tests..."
+                sh "pip install -q --upgrade"
+            }
+        }
         stage('Setup & Install') {
             steps {
                 echo "Setting up environment and installing dependencies..."
@@ -28,9 +34,8 @@ pipeline {
                     --server.enableCORS=false \\
                     --server.enableXsrfProtection=false > ../streamlit.log 2>&1 &
                 """
-
                 echo "Giving application time to start and verifying..."
-                sh "sleep 90"
+                sh "sleep 900"
             }
         }
     }
