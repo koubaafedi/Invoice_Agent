@@ -1,36 +1,49 @@
 pipeline {
-    agent any
-    
+    agent any // Run on the default Jenkins agent
+
+    environment {
+        APP_PORT = "8501"
+        APP_PROCESS_IDENTIFIER = "venv/bin/python3 -m streamlit run app.py"
+    }
+
     stages {
-        stage('Setup Environment') {
+        stage('Setup & Install') {
             steps {
-                sh 'python3 -m venv venv'
-                sh '. venv/bin/activate && python3 -m pip install --upgrade pip'
-                sh '. venv/bin/activate && pip install -r requirements.txt'
+                echo "Setting up environment and installing dependencies..."
+                sh "python3 -m venv venv"
+                sh "venv/bin/pip install --upgrade pip && venv/bin/pip install -r requirements.txt"
             }
         }
-        
-        stage('Deploy') {
-            steps {
-                sh 'pkill -f streamlit || true'
-                
-                sh '''
-                    . venv/bin/activate
-                    nohup streamlit run app.py --server.port=8501 > streamlit.log 2>&1 &
-                '''
-                echo 'Streamlit app started on port 8501'
 
-                sh "sleep 1000"
+        stage('Run & Verify Application') {
+            steps {
+                echo "Stopping existing application instance and launching new one..."
+                sh "pkill -f '${APP_PROCESS_IDENTIFIER}' || true"
+
+                sh """
+                cd src
+                nohup ../venv/bin/python3 -m streamlit run app.py \\
+                    --server.port=${APP_PORT} \\
+                    --server.address=0.0.0.0 \\
+                    --server.enableCORS=false \\
+                    --server.enableXsrfProtection=false > ../streamlit.log 2>&1 &
+                """
+
+                echo "Giving application time to start and verifying..."
+                sh "sleep 150"
             }
         }
     }
-    
+
     post {
-        success {
-            echo 'Pipeline completed successfully!'
+        always {
+            deleteDir()
         }
         failure {
-            echo 'Pipeline failed!'
+            echo "Pipeline failed!"
+        }
+        success {
+            echo "Pipeline completed successfully. App running on http://localhost:${APP_PORT}"
         }
     }
 }
