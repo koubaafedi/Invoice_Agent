@@ -3,8 +3,8 @@ import os
 import json
 from tools import load_data, InvoiceAssistant
 
-# Constants
-history_file = '../data/chat_history.json'
+# Constants - use absolute path
+history_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'chat_history.json')
 
 # Configure the Streamlit page
 st.set_page_config(
@@ -15,6 +15,8 @@ st.set_page_config(
 
 # Initialize chat history file if it doesn't exist
 if not os.path.exists(history_file):
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(history_file), exist_ok=True)
     with open(history_file, 'w') as file:
         json.dump({"interactions": []}, file)
 

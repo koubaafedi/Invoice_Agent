@@ -12,7 +12,9 @@ load_dotenv()
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 def load_data():
-    return pd.read_csv('../data/invoice_dataset.csv')
+    # Use an absolute path that works in Docker
+    csv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'invoice_dataset.csv')
+    return pd.read_csv(csv_path)
 
 def extract_invoice_ids_prompt(question, previous_invoice_ids):
     previous_context_instruction = ""
