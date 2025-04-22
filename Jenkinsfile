@@ -21,7 +21,7 @@ pipeline {
 
                 sh """
                 cd src
-                nohup python3 -m streamlit run app.py \\
+                nohup ../venv/bin/python3 -m streamlit run app.py \\
                     --server.port=${APP_PORT} \\
                     --server.address=0.0.0.0 \\
                     --server.enableCORS=false \\
