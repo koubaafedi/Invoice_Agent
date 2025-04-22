@@ -12,12 +12,12 @@ pipeline {
             steps {
                 echo "Creating virtual environment and installing dependencies..."
                 sh """
-                # Create virtual environment
-                python3 -m venv ${VENV_PATH}
+                # Create virtual environment if it doesn't exist
+                [ ! -d ${VENV_PATH} ] && python3 -m venv ${VENV_PATH}
                 
-                # Install dependencies in the virtual environment
-                ${VENV_PATH}/bin/pip install --upgrade pip
-                ${VENV_PATH}/bin/pip install -r requirements.txt
+                # Install dependencies quietly
+                ${VENV_PATH}/bin/pip install -q --upgrade pip
+                ${VENV_PATH}/bin/pip install -q -r requirements.txt
                 """
             }
         }
@@ -29,29 +29,35 @@ pipeline {
                 // Stop any running instances of the app
                 sh "pkill -f '${APP_PROCESS_NAME}' || true"
                 
-                // Launch the application using the virtual environment
+                // Create a startup script that will be used to launch the app
                 sh """
-                cd src
-                nohup ${VENV_PATH}/bin/python -m streamlit run app.py \
-                    --server.port=${APP_PORT} \
-                    --server.address=0.0.0.0 \
-                    --server.enableCORS=false \
-                    --server.enableXsrfProtection=false > ../streamlit.log 2>&1 & 
-                echo \$! > ../app.pid
+                cat > ${WORKSPACE}/start_app.sh << 'EOL'
+#!/bin/bash
+cd ${WORKSPACE}/src
+nohup ${VENV_PATH}/bin/python -m streamlit run app.py \\
+    --server.port=${APP_PORT} \\
+    --server.address=0.0.0.0 \\
+    --server.enableCORS=false \\
+    --server.enableXsrfProtection=false > ${WORKSPACE}/streamlit.log 2>&1 &
+echo \$! > ${WORKSPACE}/app.pid
+EOL
+
+                chmod +x ${WORKSPACE}/start_app.sh
+                
+                # Run the startup script and detach it from Jenkins process tree
+                ${WORKSPACE}/start_app.sh
                 """
                 
-                // Give the app a chance to start and verify it's running
-                sh """
-                # Wait for application to start
-                sleep 120
+                // Give the app a moment to start
+                sh "sleep 10"
                 
-                # Check if application is running
+                // Verify the application is running
+                sh """
                 if curl -s --head --fail http://localhost:${APP_PORT} > /dev/null; then
                     echo "Application is running correctly"
                 else
-                    # Check logs for errors
-                    echo "=== Application failed to start, last 20 lines of log: ==="
-                    tail -n 20 ../streamlit.log || true
+                    echo "Application failed to start properly"
+                    cat ${WORKSPACE}/streamlit.log
                     exit 1
                 fi
                 """
@@ -68,6 +74,24 @@ pipeline {
         success {
             echo "Application successfully deployed!"
             echo "Access the application at: http://localhost:${APP_PORT}"
+            
+            // Create a simple health check script that can be run as a cron job
+            sh """
+            cat > ${WORKSPACE}/health_check.sh << 'EOL'
+#!/bin/bash
+if ! pgrep -f "${APP_PROCESS_NAME}" > /dev/null; then
+    echo "Streamlit app is not running. Restarting..."
+    ${WORKSPACE}/start_app.sh
+    echo "App restarted at \$(date)" >> ${WORKSPACE}/restart_log.txt
+fi
+EOL
+            chmod +x ${WORKSPACE}/health_check.sh
+            
+            echo "Created health check script at ${WORKSPACE}/health_check.sh"
+            echo "Consider adding this to crontab to ensure app stays running:"
+            echo "*/5 * * * * ${WORKSPACE}/health_check.sh"
+            """
+            
             // Display information about the running process
             sh "ps -ef | grep '${APP_PROCESS_NAME}' | grep -v grep || true"
         }
