@@ -19,26 +19,35 @@ pipeline {
 
         stage('Setup Application Environment') {
             steps {
-                echo "Setting up Python environment and installing dependencies..."
-                // Use 'python3' here
-                sh "python3 -m pip install --upgrade pip"
-                sh "python3 -m pip install -r requirements.txt"
-                echo "Dependencies installed."
+                echo "Setting up Python virtual environment and installing dependencies..."
+                // Create a virtual environment named 'venv' in the workspace
+                sh "python3 -m venv venv"
+
+                // Install dependencies into the virtual environment
+                // Use the pip executable from the virtual environment
+                sh "venv/bin/pip install --upgrade pip"
+                sh "venv/bin/pip install -r requirements.txt"
+
+                echo "Dependencies installed in virtual environment."
             }
         }
 
         stage('Run Application') {
             steps {
                 echo "Stopping existing application instance..."
-                // Use the variable defined in the environment block
+                // The process identifier will now be the path to the venv python3
+                // Adjust this based on how the process appears, maybe "venv/bin/python3 -m streamlit..."
+                APP_PROCESS_IDENTIFIER = "venv/bin/python3 -m streamlit run app.py" // Update identifier
+
+                // Stop any running instances
                 sh "pkill -f '${APP_PROCESS_IDENTIFIER}' || true"
                 echo "Existing instances stopped."
 
-                echo "Launching application in background..."
-                // Use 'python3' here
+                echo "Launching application in background from virtual environment..."
+                // Run the application using the python3 executable from the virtual environment
                 sh """
                 cd src
-                nohup python3 -m streamlit run app.py \\
+                nohup ../venv/bin/python3 -m streamlit run app.py \\
                     --server.port=${APP_PORT} \\
                     --server.address=0.0.0.0 \\
                     --server.enableCORS=false \\
@@ -47,10 +56,10 @@ pipeline {
                 echo "Application launch command executed."
 
                 echo "Giving application time to start..."
-                sh "sleep 15" // Wait for 15 seconds to allow the app to start
+                sh "sleep 15"
 
                 echo "Verifying application process is running..."
-                // Use the variable defined in the environment block
+                // Check for the process using the virtual environment path
                 sh "pgrep -f '${APP_PROCESS_IDENTIFIER}'"
                 echo "Application process found."
             }
