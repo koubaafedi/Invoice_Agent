@@ -12,7 +12,7 @@ pipeline {
         stage('Setup') {
             steps {
                 echo "Creating virtual environment and installing dependencies..."
-                sh """
+                sh '''
                 # Create virtual environment if it doesn't exist
                 [ ! -d ${VENV_PATH} ] && python3 -m venv ${VENV_PATH}
                 
@@ -20,7 +20,7 @@ pipeline {
                 ${VENV_PATH}/bin/pip install -q --upgrade pip
                 ${VENV_PATH}/bin/pip install -q -r requirements.txt
                 ${VENV_PATH}/bin/pip install -q google-generativeai --upgrade
-                """
+                '''
             }
         }
 
@@ -28,49 +28,49 @@ pipeline {
             steps {
                 echo "Creating daemon script for persistent application..."
                 
-                // Create a daemon script that will keep the app running
-                sh """
+                // Create a simple daemon script without complex variable interpolation
+                sh '''
                 cat > ${DAEMON_SCRIPT} << 'EOL'
 #!/bin/bash
 
-# Configuration
-WORKSPACE="${WORKSPACE}"
-VENV="${VENV_PATH}"
-PORT="${APP_PORT}"
+# Variables will be set here by sed
+WORKSPACE="__WORKSPACE__"
+VENV="__VENV__" 
+PORT="__PORT__"
 LOGFILE="${WORKSPACE}/streamlit.log"
 PIDFILE="${WORKSPACE}/app.pid"
-STARTCMD="${VENV_PATH}/bin/python -m streamlit run app.py --server.port=${APP_PORT} --server.address=0.0.0.0 --server.enableCORS=false --server.enableXsrfProtection=false"
+STARTCMD="${VENV}/bin/python -m streamlit run app.py --server.port=${PORT} --server.address=0.0.0.0 --server.enableCORS=false --server.enableXsrfProtection=false"
 
 # Function to start the application
 start_app() {
-    echo "[\\$(date)] Starting Streamlit app..." >> "\$LOGFILE"
+    echo "[$(date)] Starting Streamlit app..." >> "$LOGFILE"
     cd "${WORKSPACE}/src"
-    nohup \$STARTCMD >> "\$LOGFILE" 2>&1 &
-    echo \$! > "\$PIDFILE"
-    echo "[\\$(date)] App started with PID \\$(cat \$PIDFILE)" >> "\$LOGFILE"
+    nohup $STARTCMD >> "$LOGFILE" 2>&1 &
+    echo $! > "$PIDFILE"
+    echo "[$(date)] App started with PID $(cat $PIDFILE)" >> "$LOGFILE"
 }
 
 # Function to check if app is running
 is_running() {
-    [ -f "\$PIDFILE" ] && ps -p \\$(cat "\$PIDFILE") > /dev/null 2>&1
+    [ -f "$PIDFILE" ] && ps -p $(cat "$PIDFILE") > /dev/null 2>&1
 }
 
 # Function to stop the application
 stop_app() {
-    if [ -f "\$PIDFILE" ]; then
-        echo "[\\$(date)] Stopping Streamlit app..." >> "\$LOGFILE"
-        PID=\\$(cat "\$PIDFILE")
-        kill \$PID 2>/dev/null || kill -9 \$PID 2>/dev/null || true
-        rm -f "\$PIDFILE"
-        echo "[\\$(date)] App stopped" >> "\$LOGFILE"
+    if [ -f "$PIDFILE" ]; then
+        echo "[$(date)] Stopping Streamlit app..." >> "$LOGFILE"
+        PID=$(cat "$PIDFILE")
+        kill $PID 2>/dev/null || kill -9 $PID 2>/dev/null || true
+        rm -f "$PIDFILE"
+        echo "[$(date)] App stopped" >> "$LOGFILE"
     fi
 }
 
 # Main logic
-case "\$1" in
+case "$1" in
     start)
         if is_running; then
-            echo "App already running with PID \\$(cat \$PIDFILE)"
+            echo "App already running with PID $(cat $PIDFILE)"
         else
             start_app
             sleep 5
@@ -104,14 +104,14 @@ case "\$1" in
         ;;
     status)
         if is_running; then
-            echo "App is running with PID \\$(cat \$PIDFILE)"
+            echo "App is running with PID $(cat $PIDFILE)"
         else
             echo "App is not running"
             exit 1
         fi
         ;;
     *)
-        echo "Usage: \$0 {start|stop|restart|status}"
+        echo "Usage: $0 {start|stop|restart|status}"
         exit 1
         ;;
 esac
@@ -119,12 +119,17 @@ esac
 exit 0
 EOL
                 chmod +x ${DAEMON_SCRIPT}
-                """
+                
+                # Replace placeholders with actual values
+                sed -i "s|__WORKSPACE__|${WORKSPACE}|g" ${DAEMON_SCRIPT}
+                sed -i "s|__VENV__|${VENV_PATH}|g" ${DAEMON_SCRIPT}
+                sed -i "s|__PORT__|${APP_PORT}|g" ${DAEMON_SCRIPT}
+                '''
                 
                 // Stop any existing instances and start the app
-                sh """
+                sh '''
                 # Stop any running instances
-                pkill -f '${APP_PROCESS_NAME}' || true
+                pkill -f "${APP_PROCESS_NAME}" || true
                 
                 # Start the app using the daemon script
                 ${DAEMON_SCRIPT} start
@@ -134,10 +139,10 @@ EOL
                 
                 # Check if app is running
                 ${DAEMON_SCRIPT} status
-                """
+                '''
                 
                 // Verify the application is accessible
-                sh """
+                sh '''
                 # Test app accessibility
                 if curl -s --head --fail http://localhost:${APP_PORT} > /dev/null; then
                     echo "Application is accessible at http://localhost:${APP_PORT}"
@@ -146,7 +151,7 @@ EOL
                     tail -n 50 ${WORKSPACE}/streamlit.log
                     exit 1
                 fi
-                """
+                '''
             }
         }
     }
@@ -154,10 +159,10 @@ EOL
     post {
         failure {
             echo "Pipeline failed! Check logs for details."
-            sh """
+            sh '''
             echo "=== Last 50 lines of log ==="
             tail -n 50 ${WORKSPACE}/streamlit.log || true
-            """
+            '''
         }
         success {
             echo "Application successfully deployed!"
@@ -172,7 +177,7 @@ EOL
             echo "* * * * * ${DAEMON_SCRIPT} start >/dev/null 2>&1"
             
             // Display running process info
-            sh "ps -ef | grep '${APP_PROCESS_NAME}' | grep -v grep || true"
+            sh 'ps -ef | grep "${APP_PROCESS_NAME}" | grep -v grep || true'
         }
     }
 }
