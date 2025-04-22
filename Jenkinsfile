@@ -3,46 +3,58 @@ pipeline {
 
     environment {
         APP_PORT = "8501"
-        APP_PROCESS_IDENTIFIER = "venv/bin/python3 -m streamlit run app.py"
+        APP_PROCESS_NAME = "streamlit run app.py"
     }
 
     stages {
-
-        stage('Setup & Install') {
+        stage('Setup') {
             steps {
-                echo "Setting up environment and installing dependencies..."
-                sh "python3 -m venv venv"
-                sh "venv/bin/pip install --upgrade pip && venv/bin/pip install -r requirements.txt"
+                echo "Installing dependencies..."
+                sh "pip install --user -r requirements.txt"
             }
         }
 
-        stage('Run & Verify Application') {
+        stage('Deploy Application') {
             steps {
-                echo "Stopping existing application instance and launching new one..."
-                // Stop any running instances
-                sh "pkill -f '${APP_PROCESS_IDENTIFIER}' || true"
-
-                // Launch application in background from virtual environment
+                echo "Deploying streamlit application..."
+                
+                // Stop any running instances of the app
+                sh "pkill -f '${APP_PROCESS_NAME}' || true"
+                
+                // Launch the application properly so it persists
                 sh """
                 cd src
-                nohup ../venv/bin/python3 -m streamlit run app.py \\
-                    --server.port=${APP_PORT} \\
-                    --server.address=0.0.0.0 \\
-                    --server.enableCORS=false \\
-                    --server.enableXsrfProtection=false > ../streamlit.log 2>&1 &
+                nohup python3 -m streamlit run app.py \
+                    --server.port=${APP_PORT} \
+                    --server.address=0.0.0.0 \
+                    --server.enableCORS=false \
+                    --server.enableXsrfProtection=false > ../streamlit.log 2>&1 & 
+                echo \$! > ../app.pid
                 """
-
-                sh "sleep 55"
+                
+                // Give the app a moment to start
+                sh "sleep 10"
+                
+                // Verify the application is running
+                sh """
+                if curl -s http://localhost:${APP_PORT} > /dev/null; then
+                    echo "Application is running correctly"
+                else
+                    echo "Application failed to start properly"
+                    exit 1
+                fi
+                """
             }
         }
     }
 
     post {
         failure {
-            echo "Pipeline failed!"
+            echo "Pipeline failed! Check logs for details."
         }
         success {
-            echo "Pipeline completed successfully. App running on http://localhost:${APP_PORT}"
+            echo "Application successfully deployed and verified!"
+            echo "Access the application at: http://localhost:${APP_PORT}"
         }
     }
 }
