@@ -3,16 +3,9 @@ pipeline {
 
     environment {
         APP_PORT = "8501"
-        APP_PROCESS_IDENTIFIER = "streamlit run app.py"
     }
 
     stages {
-        stage('test') {
-            steps {
-                echo "Running tests..."
-                sh "pip install -q --upgrade"
-            }
-        }
         stage('Setup & Install') {
             steps {
                 echo "Setting up environment and installing dependencies..."
@@ -24,11 +17,11 @@ pipeline {
         stage('Run & Verify Application') {
             steps {
                 echo "Stopping existing application instance and launching new one..."
-                sh "pkill -f '${APP_PROCESS_IDENTIFIER}' || true"
+                sh "pkill -f 'streamlit run app.py' || true"
 
                 sh """
                 cd src
-                nohup ../venv/bin/python3 -m streamlit run app.py \\
+                nohup python3 -m streamlit run app.py \\
                     --server.port=${APP_PORT} \\
                     --server.address=0.0.0.0 \\
                     --server.enableCORS=false \\
