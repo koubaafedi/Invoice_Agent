@@ -8,7 +8,7 @@ history_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 
 # Configure the Streamlit page
 st.set_page_config(
-    page_title="Assistant de Factures",
+    page_title="Assistant de Factures et Commandes",
     page_icon="📊",
     layout="centered"
 )
@@ -25,13 +25,13 @@ if not os.path.exists(history_file):
 def cached_load_data():
     return load_data()
 
-# Load the invoice data
-with st.spinner("Loading invoice data..."):
-    invoice_df = cached_load_data()
+# Load the data
+with st.spinner("Chargement des données de factures et commandes..."):
+    invoice_df, order_df = cached_load_data()
 
 # Initialize chat instance in session state if not already there
 if "chat_instance" not in st.session_state:
-    st.session_state.chat_instance = InvoiceAssistant(invoice_df)
+    st.session_state.chat_instance = InvoiceAssistant(invoice_df, order_df)
 
 # Initialize toggle state in session state if not already there
 if "toggle_states" not in st.session_state:
@@ -47,13 +47,13 @@ if st.sidebar.button('Effacer la conversation'):
         json.dump({"interactions": []}, file)
     
     # Reset the chat instance
-    st.session_state.chat_instance = InvoiceAssistant(invoice_df)
+    st.session_state.chat_instance = InvoiceAssistant(invoice_df, order_df)
     # Reset toggle states
     st.session_state.toggle_states = {}
     st.rerun()
 
 # Display a small header
-st.header("Assistant de Factures")
+st.header("Assistant de Factures et Commandes")
 
 # Display chat messages from history
 with open(history_file, 'r') as file:
@@ -87,14 +87,14 @@ for i, interaction in enumerate(interactions):
                 st.subheader("Résultat de l'extraction")
                 st.code(interaction["ids_result"], language="text")
                 
-                st.subheader("Informations sur la facture")
+                st.subheader("Informations extraites")
                 st.code(interaction["combined_info"], language="text")
                 
                 st.subheader("Prompt de réponse")
                 st.code(interaction["answer_prompt"], language="text")
 
 # Get user input
-user_query = st.chat_input("Posez une question sur les factures...")
+user_query = st.chat_input("Posez une question sur les factures ou les commandes...")
 
 # Process the user query
 if user_query:
