@@ -8,6 +8,21 @@ pipeline {
     }
 
     stages {
+        stage('Clean Workspace') { // Add a stage for cleanup
+            steps {
+                echo "Cleaning workspace..."
+                cleanWs() // This step cleans the workspace
+                echo "Workspace cleaned."
+            }
+        }
+        stage('Declarative: Checkout SCM') { // Ensure this runs after cleaning
+            steps {
+                 echo "Checking out SCM..."
+                 checkout scm // Your SCM checkout step
+                 echo "SCM checkout complete."
+            }
+        }
+
         stage('Build Docker Image') {
             steps {
                 script {
@@ -25,12 +40,13 @@ pipeline {
                     echo "Deploying Docker container..."
                     sh "docker stop ${DOCKER_CONTAINER_NAME} || true"
                     sh "docker rm ${DOCKER_CONTAINER_NAME} || true"
+
                     def runningContainer = docker.image("${DOCKER_IMAGE_NAME}:latest").run(
                         "-p ${APP_PORT}:8501 --name ${DOCKER_CONTAINER_NAME}"
                     )
-
                     echo "Docker container ${DOCKER_CONTAINER_NAME} started."
 
+                    sh "sleep 10"
                     sh "docker ps | grep ${DOCKER_CONTAINER_NAME}"
                 }
             }
