@@ -5,7 +5,7 @@ pipeline {
         // Replace with your Docker Hub username or private registry
         DOCKER_REGISTRY = "your_dockerhub_username"
         IMAGE_NAME = "invoice-assistant-app" // Give your application image a distinct name
-        IMAGE_TAG = env.BUILD_NUMBER // Use Jenkins build number as tag
+        IMAGE_TAG = "${env.BUILD_NUMBER}" // Use Jenkins build number as tag
         APP_CONTAINER_NAME = "invoice_assistant_running" // Name for the running application container
         APP_PORT = "8501" // Port your Streamlit app runs on
     }
