@@ -1,6 +1,7 @@
 import pandas as pd
 import re
 import os
+import json
 from dotenv import load_dotenv
 from google import genai
 import uuid
@@ -169,9 +170,16 @@ Si une date est demandée, donnez la dans un format clair, comme le jour/mois/an
         ids_response = self.chat.send_message(extract_prompt).text.strip()
         
         try:
+            # Clean up and pre-process the JSON response
+            # Find JSON content between curly braces if surrounded by other text
+            json_match = re.search(r'\{.*\}', ids_response, re.DOTALL)
+            if (json_match):
+                cleaned_json = json_match.group(0)
+            else:
+                cleaned_json = ids_response
+                
             # Parse the JSON response
-            import json
-            ids_result = json.loads(ids_response)
+            ids_result = json.loads(cleaned_json)
             
             invoice_ids = ids_result.get('invoices', [])
             order_ids = ids_result.get('orders', [])
@@ -199,10 +207,24 @@ Si une date est demandée, donnez la dans un format clair, comme le jour/mois/an
                 combined_info = invoice_info + "\n" + order_info if invoice_info and order_info else invoice_info or order_info
             
         except Exception as e:
-            # Handle parsing errors
-            invoice_ids = []
-            order_ids = []
-            combined_info = f"Erreur lors de l'extraction des numéros: {str(e)}"
+            # Fallback for JSON parsing errors: try to extract IDs using regex
+            invoice_ids = re.findall(r'FAC-\d{4}', ids_response)
+            order_ids = re.findall(r'COM-\d{4}', ids_response)
+            
+            if invoice_ids or order_ids:
+                # If regex extraction worked, proceed with those IDs
+                invoice_info = get_invoice_information(invoice_ids, self.invoice_df) if invoice_ids else ""
+                order_info = get_order_information(order_ids, self.order_df) if order_ids else ""
+                combined_info = invoice_info + "\n" + order_info if invoice_info and order_info else invoice_info or order_info
+                
+                # Update current context
+                self.current_invoice_ids = invoice_ids
+                self.current_order_ids = order_ids
+            else:
+                # If all extraction methods fail, provide useful error info
+                combined_info = f"Erreur lors de l'extraction des numéros: {str(e)}\nRéponse brute: {ids_response}"
+                invoice_ids = []
+                order_ids = []
         
         # Prepare the answer prompt
         answer_prompt = answer_based_on_info_prompt(question, combined_info)
