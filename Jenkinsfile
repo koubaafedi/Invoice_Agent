@@ -1,119 +1,86 @@
 pipeline {
-    agent any // The main agent for checkout
+    agent any // Run on the default Jenkins agent (your Jenkins Docker container)
 
     environment {
-        // Replace with your Docker Hub username or private registry
-        DOCKER_REGISTRY = "your_dockerhub_username"
-        IMAGE_NAME = "invoice-assistant-app"
-        IMAGE_TAG = "${env.BUILD_NUMBER}"
-        APP_CONTAINER_NAME = "invoice_assistant_running"
         APP_PORT = "8501"
+        // Use a more specific process name for pkill/pgrep if possible
+        // Adjust this based on how the 'streamlit run app.py' process appears in 'ps aux' output
+        APP_PROCESS_IDENTIFIER = "streamlit run app.py"
     }
 
     stages {
         stage('Checkout') {
             steps {
-                checkout scm
+                echo "Checking out code from SCM..."
+                checkout scm // Checks out the code from the repository configured in the job
+                echo "Code checked out."
             }
         }
 
-        stage('Build Application Docker Image') {
-            agent {
-                // Use a Docker container with the Docker CLI for this stage
-                docker {
-                    image 'docker:latest'
-                    // Mount the workspace to access your code and Dockerfile
-                    args '-v $PWD:$PWD -w $PWD' // Mount current workspace and set it as working directory
-                    // Also mount the Docker socket from the host (via the Jenkins agent's mount)
-                    args '-v /var/run/docker.sock:/var/run/docker.sock'
-                }
-            }
+        stage('Setup Application Environment') {
             steps {
-                script {
-                    // The docker command should now be available inside this agent container
-                    sh "docker build -t ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ."
-                }
+                echo "Setting up Python environment and installing dependencies..."
+                // THESE COMMANDS REQUIRE 'python' AND 'pip' TO BE AVAILABLE
+                // IN THE JENKINS AGENT CONTAINER'S PATH.
+                sh "python -m pip install --upgrade pip"
+                sh "pip install -r requirements.txt"
+                echo "Dependencies installed."
             }
         }
 
-        stage('Test') {
-             agent {
-                // You could run tests in a container built from your app image
-                // Or, if tests require the original code, use a Python image with workspace mounted
-                docker {
-                    image 'python:3.9-slim' // Example: use a Python image
-                    args '-v $PWD:$PWD -w $PWD' // Mount current workspace
-                }
-            }
+        stage('Run Application') {
             steps {
-                echo "Running tests (Implement actual test execution here)"
-                // Install dependencies (within the ephemeral test container)
-                sh 'pip install --no-cache-dir -r requirements.txt'
-                // Run your tests
-                // Example: sh 'pytest tests/'
-            }
-        }
+                echo "Stopping existing application instance..."
+                // Stop any running instances of the application using pkill
+                // '|| true' ensures the step doesn't fail if no process is found
+                sh "pkill -f '${APP_PROCESS_IDENTIFIER}' || true"
+                echo "Existing instances stopped."
 
-        stage('Push Docker Image') {
-             agent {
-                // Use a Docker container with the Docker CLI for this stage
-                docker {
-                    image 'docker:latest'
-                     args '-v /var/run/docker.sock:/var/run/docker.sock'
-                     // Mount docker config for authentication if pushing to private/authenticated registry
-                     // You might need to experiment with the path for Windows
-                     // args '-v "%USERPROFILE%/.docker/config.json":/root/.docker/config.json:ro'
-                }
-            }
-            steps {
-                script {
-                    // Push the image to the registry
-                    // Replace 'dockerhub-credentials-id' with your Jenkins credential ID for your Docker registry
-                    // The docker.withRegistry block handles authentication using the mounted config
-                    docker.withRegistry("https://${DOCKER_REGISTRY}", 'dockerhub-credentials-id') {
-                        docker.image("${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}").push()
-                        docker.image("${DOCKER_REGISTRY}/${IMAGE_NAME}:latest").push()
-                    }
-                }
-            }
-        }
-
-        stage('Deploy') {
-             agent {
-                // Use a Docker container with the Docker CLI for this stage
-                docker {
-                    image 'docker:latest'
-                     args '-v /var/run/docker.sock:/var/run/docker.sock'
-                }
-            }
-            steps {
-                echo "Stopping old container and starting new one..."
-                // Stop and remove the old container instance of your application
-                sh "docker stop ${APP_CONTAINER_NAME} || true"
-                sh "docker rm ${APP_CONTAINER_NAME} || true"
-
-                // Run a new container using the freshly built and pushed application image
-                // Mount the Jenkins home volume if your app needs access to it (e.g., chat history file)
+                echo "Launching application in background..."
+                // Launch application in background using nohup
+                // Redirect output to a log file in the workspace
                 sh """
-                docker run -d \
-                --name ${APP_CONTAINER_NAME} \
-                -p ${APP_PORT}:${APP_PORT} \
-                -v jenkins_home:/var/jenkins_home \
-                ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
-                """ // Adjust volume mapping (-v) if needed
+                cd src
+                nohup python -m streamlit run app.py \\
+                    --server.port=${APP_PORT} \\
+                    --server.address=0.0.0.0 \\
+                    --server.enableCORS=false \\
+                    --server.enableXsrfProtection=false > ../streamlit.log 2>&1 &
+                """
+                echo "Application launch command executed."
+
+                echo "Giving application time to start..."
+                sh "sleep 15" // Wait for 15 seconds to allow the app to start
+
+                echo "Verifying application process is running..."
+                // Check if the process is running using pgrep
+                sh "pgrep -f '${APP_PROCESS_IDENTIFIER}'"
+                echo "Application process found."
+            }
+        }
+
+        stage('Verify Application Access') {
+            steps {
+                 echo "Attempting to access application endpoint..."
+                 // Perform a basic health check by trying to access the application's HTTP endpoint
+                 // Requires 'curl' or 'wget' to be available in the Jenkins agent container
+                 sh "curl -Is http://localhost:${APP_PORT} | head -n 1"
+                 echo "Application endpoint check completed."
             }
         }
     }
 
     post {
         always {
+            // Clean up the workspace after the job finishes
             deleteDir()
         }
         failure {
             echo "Pipeline failed! Check the logs for details."
         }
         success {
-            echo "Pipeline completed successfully! New application container is running."
+            echo "Pipeline completed successfully! Application should be running in the background."
+            echo "Access the app at http://localhost:${APP_PORT}"
         }
     }
 }
