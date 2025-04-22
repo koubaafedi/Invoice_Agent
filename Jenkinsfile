@@ -4,8 +4,8 @@ pipeline {
     environment {
         APP_PORT = "8501"
         // Define the process identifier here at the top level
-        // Update the string to match how the process will appear with 'python3'
-        APP_PROCESS_IDENTIFIER = "python3 -m streamlit run app.py"
+        // Use the path to the python3 executable within the virtual environment
+        APP_PROCESS_IDENTIFIER = "venv/bin/python3 -m streamlit run app.py"
     }
 
     stages {
@@ -20,11 +20,10 @@ pipeline {
         stage('Setup Application Environment') {
             steps {
                 echo "Setting up Python virtual environment and installing dependencies..."
-                // Create a virtual environment named 'venv' in the workspace
+                // Create a virtual environment
                 sh "python3 -m venv venv"
 
                 // Install dependencies into the virtual environment
-                // Use the pip executable from the virtual environment
                 sh "venv/bin/pip install --upgrade pip"
                 sh "venv/bin/pip install -r requirements.txt"
 
@@ -35,16 +34,12 @@ pipeline {
         stage('Run Application') {
             steps {
                 echo "Stopping existing application instance..."
-                // The process identifier will now be the path to the venv python3
-                // Adjust this based on how the process appears, maybe "venv/bin/python3 -m streamlit..."
-                APP_PROCESS_IDENTIFIER = "venv/bin/python3 -m streamlit run app.py" // Update identifier
-
-                // Stop any running instances
+                // Use the variable defined in the environment block
                 sh "pkill -f '${APP_PROCESS_IDENTIFIER}' || true"
                 echo "Existing instances stopped."
 
                 echo "Launching application in background from virtual environment..."
-                // Run the application using the python3 executable from the virtual environment
+                // Use the python3 executable from the virtual environment
                 sh """
                 cd src
                 nohup ../venv/bin/python3 -m streamlit run app.py \\
@@ -59,7 +54,7 @@ pipeline {
                 sh "sleep 15"
 
                 echo "Verifying application process is running..."
-                // Check for the process using the virtual environment path
+                // Use the variable defined in the environment block for pgrep
                 sh "pgrep -f '${APP_PROCESS_IDENTIFIER}'"
                 echo "Application process found."
             }
