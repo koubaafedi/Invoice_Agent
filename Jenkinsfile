@@ -3,16 +3,16 @@ pipeline {
 
     environment {
         APP_PORT = "8501"
-        // Use a more specific process name for pkill/pgrep if possible
-        // Adjust this based on how the 'streamlit run app.py' process appears in 'ps aux' output
-        APP_PROCESS_IDENTIFIER = "streamlit run app.py"
+        // Define the process identifier here at the top level
+        // Update the string to match how the process will appear with 'python3'
+        APP_PROCESS_IDENTIFIER = "python3 -m streamlit run app.py"
     }
 
     stages {
         stage('Checkout') {
             steps {
                 echo "Checking out code from SCM..."
-                checkout scm // Checks out the code from the repository configured in the job
+                checkout scm
                 echo "Code checked out."
             }
         }
@@ -20,9 +20,9 @@ pipeline {
         stage('Setup Application Environment') {
             steps {
                 echo "Setting up Python environment and installing dependencies..."
-                // Change 'python' to 'python3'
+                // Use 'python3' here
                 sh "python3 -m pip install --upgrade pip"
-                sh "python3 -m pip install -r requirements.txt" // Use python3 with pip
+                sh "python3 -m pip install -r requirements.txt"
                 echo "Dependencies installed."
             }
         }
@@ -30,15 +30,12 @@ pipeline {
         stage('Run Application') {
             steps {
                 echo "Stopping existing application instance..."
-                // Use a more specific process name for pkill/pgrep if possible
-                // Adjust this based on how the 'streamlit run app.py' process appears in 'ps aux' output
-                // The process will now likely show 'python3 -m streamlit...'
-                APP_PROCESS_IDENTIFIER = "python3 -m streamlit run app.py" // Update identifier if needed
+                // Use the variable defined in the environment block
                 sh "pkill -f '${APP_PROCESS_IDENTIFIER}' || true"
                 echo "Existing instances stopped."
 
                 echo "Launching application in background..."
-                // Change 'python' to 'python3'
+                // Use 'python3' here
                 sh """
                 cd src
                 nohup python3 -m streamlit run app.py \\
@@ -53,8 +50,8 @@ pipeline {
                 sh "sleep 15" // Wait for 15 seconds to allow the app to start
 
                 echo "Verifying application process is running..."
-                // Change 'python' to 'python3' in pgrep if you updated the identifier
-                sh "pgrep -f '${APP_PROCESS_IDENTIFIER}'" // Or adjust if pgrep target needs updating
+                // Use the variable defined in the environment block
+                sh "pgrep -f '${APP_PROCESS_IDENTIFIER}'"
                 echo "Application process found."
             }
         }
@@ -62,7 +59,6 @@ pipeline {
         stage('Verify Application Access') {
             steps {
                  echo "Attempting to access application endpoint..."
-                 // curl was confirmed to be installed
                  sh "curl -Is http://localhost:${APP_PORT} | head -n 1"
                  echo "Application endpoint check completed."
             }
@@ -71,7 +67,6 @@ pipeline {
 
     post {
         always {
-            // Clean up the workspace after the job finishes
             deleteDir()
         }
         failure {
