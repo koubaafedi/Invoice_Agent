@@ -88,7 +88,7 @@ for i, interaction in enumerate(interactions):
                 st.code(interaction["ids_result"], language="text")
                 
                 st.subheader("Informations sur la facture")
-                st.code(interaction["invoice_info"], language="text")
+                st.code(interaction["combined_info"], language="text")
                 
                 st.subheader("Prompt de réponse")
                 st.code(interaction["answer_prompt"], language="text")
@@ -132,7 +132,7 @@ if user_query:
         "user_query": user_query,
         "extract_prompt": pipeline_details.get("extract_prompt", ""),
         "ids_result": pipeline_details.get("ids_result", ""),
-        "invoice_info": pipeline_details.get("invoice_info", ""),
+        "combined_info": pipeline_details.get("combined_info", ""),
         "answer_prompt": pipeline_details.get("answer_prompt", ""),
         "assistant_response": full_response
     }
