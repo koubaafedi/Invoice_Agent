@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         APP_PORT = "8501"
-        APP_PROCESS_IDENTIFIER = "venv/bin/python3 -m streamlit run app.py"
+        APP_PROCESS_IDENTIFIER = "streamlit run app.py"
     }
 
     stages {
@@ -11,7 +11,7 @@ pipeline {
             steps {
                 echo "Setting up environment and installing dependencies..."
                 sh "python3 -m venv venv"
-                sh "venv/bin/pip install --upgrade pip && venv/bin/pip install -r requirements.txt"
+                sh "venv/bin/pip install -q --upgrade pip && venv/bin/pip install -q -r requirements.txt"
             }
         }
 
@@ -30,7 +30,7 @@ pipeline {
                 """
 
                 echo "Giving application time to start and verifying..."
-                sh "sleep 150"
+                sh "sleep 90"
             }
         }
     }
