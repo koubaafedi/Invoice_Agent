@@ -31,6 +31,8 @@ pipeline {
                     --server.enableCORS=false \\
                     --server.enableXsrfProtection=false > ../streamlit.log 2>&1 &
                 """
+
+                sh "sleep 55"
             }
         }
     }
