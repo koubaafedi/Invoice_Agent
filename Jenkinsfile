@@ -2,8 +2,8 @@ pipeline {
     agent any
     
     environment {
-        APP_NAME = "jenkins_invoice_assistant"
-        DOCKER_PORT = "8501"
+        PORT = "8501"
+        APP_PROCESS_NAME = "jenkins_invoice_assistant"
     }
     
     stages {
@@ -13,21 +13,37 @@ pipeline {
             }
         }
         
-        stage('Build') {
+        stage('Setup Python Environment') {
             steps {
-                sh "docker build -t ${APP_NAME} ."
+                // Create and activate virtual environment if needed
+                sh "python -m pip install --upgrade pip"
+                sh "pip install -r requirements.txt"
             }
         }
         
-        stage('Deploy') {
+        stage('Run Application') {
             steps {
-                // Remove existing container if it exists
-                sh "docker rm -f ${APP_NAME} || true"
+                // Stop existing application instance if running
+                sh "pkill -f 'streamlit run app.py' || true"
                 
-                // Run the new container
-                sh "docker run -d -p ${DOCKER_PORT}:8501 --name ${APP_NAME} -v ${WORKSPACE}/data:/app/data -v ${WORKSPACE}/secrets:/app/secrets ${APP_NAME}"
+                // Launch application in background with nohup to keep it running after Jenkins job completes
+                sh """
+                cd src
+                nohup python -m streamlit run app.py \
+                    --server.port=${PORT} \
+                    --server.address=0.0.0.0 \
+                    --server.enableCORS=false \
+                    --server.enableXsrfProtection=false > ../streamlit.log 2>&1 &
+                """
                 
-                echo "Application deployed at http://localhost:${DOCKER_PORT}"
+                // Give it time to start
+                sh "sleep 5"
+                
+                echo "Application started at http://localhost:${PORT}"
+                echo "Check logs in ${WORKSPACE}/streamlit.log"
+                
+                // Verify it's running
+                sh "ps aux | grep 'streamlit run app.py' | grep -v grep"
             }
         }
     }
@@ -37,7 +53,7 @@ pipeline {
             echo "Pipeline failed! Check the logs for details."
         }
         success {
-            echo "Pipeline completed successfully!"
+            echo "Pipeline completed successfully! Application is running in background."
         }
     }
 }
