@@ -28,7 +28,7 @@ pipeline {
                     --server.enableXsrfProtection=false > ../streamlit.log 2>&1 &
                 """
                 echo "Giving application time to start and verifying..."
-                sh "sleep 900"
+                sh "sleep 9000"
             }
         }
     }
